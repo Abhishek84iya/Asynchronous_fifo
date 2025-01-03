@@ -1,0 +1,191 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 03.01.2025 00:34:06
+// Design Name: 
+// Module Name: asynchronous_fifo
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: Asynchronous FIFO Design
+// 
+// Dependencies: None
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+module synchroniser(
+    input clk,              
+    input [2:0] ptr_in,     
+    output reg [2:0] ptr_out 
+);
+    reg [2:0] signal_1;
+    reg [2:0] signal_2;
+
+    always @(posedge clk) begin
+        signal_1 <= ptr_in;
+        signal_2 <= signal_1;
+        ptr_out <= signal_2;
+    end
+endmodule
+
+module asynchronous_fifo(
+    input wr_clk, input rd_clk,
+    input rst, input [7:0] data_in,
+    output reg [7:0] data_out,
+    input wr_en, input rd_en,
+    output reg fifo_full, output reg fifo_empty,output reg [3:0] count
+);
+    parameter depth = 8;
+    reg [7:0] fifo [depth-1:0];
+    reg [2:0] wr_ptr;  
+    reg [2:0] rd_ptr;  
+    //reg [3:0] count;
+
+    wire [2:0] rd_sync_ptr;
+    wire [2:0] wr_sync_ptr;
+    synchroniser sync_wr_to_rd(.clk(rd_clk), .ptr_in(wr_ptr), .ptr_out(rd_sync_ptr));
+    synchroniser sync_rd_to_wr(.clk(wr_clk), .ptr_in(rd_ptr), .ptr_out(wr_sync_ptr));
+
+    
+    always @(posedge wr_clk or posedge rst) begin
+        if (rst) begin
+            wr_ptr <= 3'b000;
+        end else if (wr_en && !fifo_full) begin
+            fifo[wr_ptr] <= data_in;
+            wr_ptr <= (wr_ptr + 1)%depth;
+        end
+    end
+
+    
+    always @(posedge rd_clk or posedge rst) begin
+        if (rst) begin
+            rd_ptr <= 3'b000;
+            data_out <= 8'b0;
+        end else if (rd_en && !fifo_empty) begin
+            data_out <= fifo[rd_ptr];
+            rd_ptr <= (rd_ptr + 1)%depth;
+        end
+    end
+
+    
+    always @(*) begin
+        fifo_full <= (count == depth);
+        fifo_empty <= (count == 0);
+    end
+
+    
+    always @(posedge wr_clk or posedge rst) begin
+        if (rst) begin
+            count <= 4'b0000; 
+        end else if (wr_en && !fifo_full) begin
+            count <= count + 1; 
+        end
+         
+    end
+        always @(posedge rd_clk or posedge rst) begin
+        if (rst) begin
+            count <= 4'b0000;
+        end else if (rd_en && !fifo_empty) begin
+            count <= count - 1;  
+        end
+         
+    end
+
+endmodule
+
+module tb_asynchronous_fifo;
+
+    // Declare inputs to the DUT
+    reg wr_clk;
+    reg rd_clk;
+    reg rst;
+    reg [7:0] data_in;
+    reg wr_en;
+    reg rd_en;
+
+    // Declare outputs from the DUT
+    wire [7:0] data_out;
+    wire fifo_full;
+    wire fifo_empty;
+    wire [3:0] count;
+
+    // Instantiate the Asynchronous FIFO module
+    asynchronous_fifo uut (
+        .wr_clk(wr_clk),
+        .rd_clk(rd_clk),
+        .rst(rst),
+        .data_in(data_in),
+        .data_out(data_out),
+        .wr_en(wr_en),
+        .rd_en(rd_en),
+        .fifo_full(fifo_full),
+        .fifo_empty(fifo_empty),
+        .count(count)
+    );
+
+    // Generate write clock (wr_clk)
+    always begin
+        #5 wr_clk = ~wr_clk; // Toggle every 5 ns
+    end
+
+    // Generate read clock (rd_clk)
+    always begin
+        #7 rd_clk = ~rd_clk; // Toggle every 7 ns
+    end
+
+    // Initial block to initialize signals and apply test cases
+    initial begin
+        // Initialize all signals
+        wr_clk = 0;
+        rd_clk = 0;
+        rst = 0;
+        data_in = 8'b0;
+        wr_en = 0;
+        rd_en = 0;
+
+        // Apply reset
+        rst = 1;
+        #20;
+        rst = 0;
+        #20;
+
+        // Test Case 1: Write data to FIFO
+        wr_en = 1;
+        data_in = 8'hA5; #10;
+        data_in = 8'h5A; #10;
+
+        // Test Case 2: Read data from FIFO
+        wr_en = 0; rd_en = 1; #14;
+
+        // Test Case 3: Write more data
+        wr_en = 1; rd_en = 0;
+        data_in = 8'h3C; #10;
+        data_in = 8'h7F; #10;
+
+        // Test Case 4: Read again
+        wr_en = 0; rd_en = 1; #14;
+
+        // Test Case 5: Fill FIFO to full
+        wr_en = 1; rd_en = 0;
+        data_in = 8'hFF; #10;
+        data_in = 8'h01; #10;
+        data_in = 8'hA0; #10;
+        data_in = 8'hB0; #10;
+        data_in = 8'hC0; #10;
+        data_in = 8'hD0; #10;
+        data_in = 8'hE0; #10;
+        data_in = 8'hF0; #10;
+
+        // Test Case 6: Attempt to write when full
+        data_in = 8'h11; #10;
+
+        // Test Case 7: Read all data
+        wr_en = 0; rd_en = 1;
+        repeat(8) #14;
+
+        // Check FIFO empty
+        $stop;  // End simulation
+    end
+endmodule
